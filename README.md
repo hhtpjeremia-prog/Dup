@@ -4,6 +4,33 @@ End-to-end data pipeline analyzing transaction data from the **G Coffee** chain 
 
 ---
 
+---
+
+## 📁 Struktur Proyek
+
+```
+Capstone-Tempa/
+├───dashboard/
+│   ├───app.py                      # Dashboard Streamlit interaktif
+│   └───Groq_analyst.py            # AI Analyst berbasis Groq API
+├───data/
+│   ├───*.parquet                   # Data hasil pipeline (transactions, users, dll)
+│   ├───*.csv                       # Association rules
+│   ├───*.json                      # Cluster metadata
+│   ├───*.joblib                    # Model ML (K-Means, scaler)
+│   └───*.txt                       # Groq API key
+├───function.py                     # Utility functions
+├───01-LoadData.ipynb               # Notebook pipeline utama
+├───... (notebook lainnya)
+├───README.md
+├───requirements.txt                # Dependencies Python
+├───url.txt                         # URL dashboard
+├───ARCHITECTURE.md
+└───SourceOfTruth.md
+```
+
+---
+
 ## 1. Project Overview
 
 | Aspect | Description |
@@ -273,7 +300,27 @@ XGBoost on residuals uses only non-autoregressive features (day_of_week, month, 
 
 ---
 
-## 6. Execution Order
+## 6. Menjalankan Dashboard
+
+```bash
+# Dari root folder Capstone-Tempa/
+cd dashboard
+streamlit run app.py
+```
+
+Atau langsung:
+```bash
+streamlit run dashboard/app.py
+```
+
+Dashboard juga sudah dideploy dan bisa diakses di:
+```
+https://g-coffee-dashboard.streamlit.app/
+```
+
+---
+
+## 7. Execution Order
 
 Run notebooks in sequence:
 

@@ -5,16 +5,18 @@ import plotly.graph_objects as go
 import json
 import numpy as np
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # ── Groq AI Analyst ────────────────────────────────────────────────────────
 from Groq_analyst import GroqAnalyst, build_context
 
 # ── Currency Configuration ──────────────────────────────────────────────────
+# Semua data dalam parquet sudah dalam Ringgit Malaysia (RM).
+# Fungsi di bawah mengonversi RM → IDR saat pengguna memilih mode IDR.
 IDR_RATE = 3500  # 1 RM = Rp 3,500 (historical conversion rate)
 
 def _c(val):
-    """Convert RM to IDR if IDR mode is selected in session state."""
+    """Convert RM → IDR if IDR mode selected (data asli dalam RM)."""
     if st.session_state.get('currency', 'RM') == 'IDR':
         return val * IDR_RATE
     return val
@@ -28,13 +30,19 @@ def _fmt_idr(n, fmt=",.0f"):
     return s
 
 def currency(val, fmt=",.0f"):
-    """Format a monetary value: converts RM→IDR if toggle is on, adds correct prefix."""
+    """Format a monetary value: converts RM↔IDR based on toggle, adds correct prefix."""
     prefix = "Rp" if st.session_state.get('currency', 'RM') == 'IDR' else "RM"
     return f"{prefix} {_fmt_idr(_c(val), fmt)}"
 
 def cur_sym():
     """Return currency symbol ('Rp' or 'RM') based on current toggle."""
     return "Rp" if st.session_state.get('currency', 'RM') == 'IDR' else "RM"
+
+def _chart_cv(df, *cols):
+    """Convert chart data RM→IDR in-place if IDR mode is on (data asli dalam RM)."""
+    if st.session_state.get('currency', 'RM') == 'IDR':
+        for col in cols:
+            df[col] = df[col] * IDR_RATE
 # ══════════════════════════════════════════════════════════════════════════════
 #  PAGE CONFIG — High-end dark mode
 # ══════════════════════════════════════════════════════════════════════════════
@@ -45,7 +53,7 @@ st.set_page_config(
     initial_sidebar_state='expanded',
 )
 
-    # ── Custom dark-theme CSS ────────────────────────────────────────────────────
+# ── Custom dark-theme CSS ────────────────────────────────────────────────────────
 
 # ── Helper: hex to rgba for plotly ────────────────────────────────────────────
 def hex_to_rgba(hex_color, alpha=0.15):
@@ -392,18 +400,20 @@ CT = chart_theme()
 #  DATA PATHS
 # ══════════════════════════════════════════════════════════════════════════════
 BASE = Path(__file__).parent.resolve()
+DATA = BASE.parent / 'data'
+MODELS = BASE.parent / 'models'
 
-MEMBER_META   = BASE / 'member_cluster_metadata.json'
-GUEST_META    = BASE / 'guest_cluster_metadata.json'
-MEMBER_RULES  = BASE / 'df_rules_member.parquet'
-GUEST_RULES   = BASE / 'df_rules_guest.parquet'
-MEMBER_SEG    = BASE / 'df_member_with_segments.parquet'
-GUEST_SEG     = BASE / 'df_guest_with_segments.parquet'
-MENU_DATA     = BASE / 'menu_cleaned.parquet'
-FC_HWR        = BASE / 'df_forecast_90days_HWR-XGB.parquet'
-FC_PROPHET    = BASE / 'df_forecast_90days_Prophet-XGB.parquet'
-FC_SARIMA     = BASE / 'df_forecast_90days_SARIMA-XGB.parquet'
-TRANS_FEATURES = BASE / 'df_transaction_features.parquet'
+MEMBER_META   = MODELS / 'member_cluster_metadata.json'
+GUEST_META    = MODELS / 'guest_cluster_metadata.json'
+MEMBER_RULES  = DATA / 'df_rules_member.parquet'
+GUEST_RULES   = DATA / 'df_rules_guest.parquet'
+MEMBER_SEG    = DATA / 'df_member_with_segments.parquet'
+GUEST_SEG     = DATA / 'df_guest_with_segments.parquet'
+MENU_DATA     = DATA / 'df_menu_cleaned.parquet'
+FC_HWR        = DATA / 'df_forecast_90days_HWR-XGB.parquet'
+FC_PROPHET    = DATA / 'df_forecast_90days_Prophet-XGB.parquet'
+FC_SARIMA     = DATA / 'df_forecast_90days_SARIMA-XGB.parquet'
+TRANS_FEATURES = DATA / 'df_transaction_features.parquet'
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  HELPER: LOADERS
@@ -647,28 +657,89 @@ if 'dashboard_lens' not in st.session_state:
     st.session_state.dashboard_lens = 'Profit'
 
 # ══════════════════════════════════════════════════════════════════════════════
-#  LOAD ALL DATA
+#  LOAD ALL DATA (with error boundaries)
 # ══════════════════════════════════════════════════════════════════════════════
 
-menu_df = load_menu()
-fin_engine = FinancialEngine(menu_df)
-fc_engine = ForecastEngine()
+@st.cache_data
+def load_all_data():
+    """Load all required data with error handling."""
+    errors = []
+    data = {}
 
-member_meta = load_json(MEMBER_META)
-guest_meta = load_json(GUEST_META)
-member_rules = load_parquet(MEMBER_RULES)
-guest_rules = load_parquet(GUEST_RULES)
-member_seg_counts = load_segment_counts(MEMBER_SEG)
-guest_seg_counts = load_segment_counts(GUEST_SEG)
+    # Menu
+    try:
+        data['menu'] = load_menu()
+    except Exception as e:
+        errors.append(f"Menu: {e}")
+        data['menu'] = pd.DataFrame()
 
-# ── Gemini AI Analyst ─────────────────────────────────────────────────────────
-gemini = GroqAnalyst()
+    # Financial engine
+    try:
+        data['fin_engine'] = FinancialEngine(data['menu']) if not data['menu'].empty else None
+    except Exception as e:
+        errors.append(f"FinancialEngine: {e}")
+        data['fin_engine'] = None
+
+    # Forecast engine
+    try:
+        data['fc_engine'] = ForecastEngine()
+    except Exception as e:
+        errors.append(f"ForecastEngine: {e}")
+        data['fc_engine'] = None
+
+    # Metadata
+    for key, path in [('member_meta', MEMBER_META), ('guest_meta', GUEST_META)]:
+        try:
+            data[key] = load_json(path)
+        except Exception as e:
+            errors.append(f"{key}: {e}")
+            data[key] = {}
+
+    # Rules
+    for key, path in [('member_rules', MEMBER_RULES), ('guest_rules', GUEST_RULES)]:
+        try:
+            data[key] = load_parquet(path)
+        except Exception as e:
+            errors.append(f"{key}: {e}")
+            data[key] = pd.DataFrame()
+
+    # Segment counts
+    for key, path in [('member_seg_counts', MEMBER_SEG), ('guest_seg_counts', GUEST_SEG)]:
+        try:
+            data[key] = load_segment_counts(path)
+        except Exception as e:
+            errors.append(f"{key}: {e}")
+            data[key] = pd.DataFrame()
+
+    return data, errors
+
+_data, _load_errors = load_all_data()
+
+# Display load errors as warnings (non-blocking)
+for err in _load_errors:
+    st.warning(f"⚠️ Data load issue: {err}")
+
+menu_df = _data.get('menu', pd.DataFrame())
+fin_engine = _data.get('fin_engine')
+fc_engine = _data.get('fc_engine')
+member_meta = _data.get('member_meta', {})
+guest_meta = _data.get('guest_meta', {})
+member_rules = _data.get('member_rules', pd.DataFrame())
+guest_rules = _data.get('guest_rules', pd.DataFrame())
+member_seg_counts = _data.get('member_seg_counts', pd.DataFrame())
+guest_seg_counts = _data.get('guest_seg_counts', pd.DataFrame())
+
+# ── AI Analyst (try init, non-blocking) ───────────────────────────────────────
+try:
+    groq_analyst = GroqAnalyst()
+except Exception:
+    groq_analyst = None
 
 # ── Color palette for dark mode ──────────────────────────────────────────────
 DARK_COLORS = [
     '#6C5CE7', '#00B894', '#FDAA5E', '#E17055',
     '#0984E3', '#A29BFE', '#55EFC4', '#FAB1A0',
-    '#74B9FF', '#81ECEC', '#FDCB6E', '#E17055',
+    '#74B9FF', '#81ECEC', '#FDCB6E', '#D63031',
 ]
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -680,7 +751,7 @@ st.sidebar.markdown("""
     <span style="font-size:2rem;">☕</span>
     <div>
         <div style="font-weight:700;font-size:1.2rem;color:#F0F0F0;">G Coffee Shop</div>
-        <div style="font-size:0.75rem;color:#888;">Strategic Intelligence</div>
+        <div style="font-size:0.75rem;color:#888;">Analytics Dashboard</div>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -689,14 +760,24 @@ st.sidebar.markdown('<hr style="border-color:#2D3142;">', unsafe_allow_html=True
 
 nav_tabs = [
     '📊  Overview',
-    '👥  Customer Segments',
-    '🛒  Bundle Intelligence',
-    '📈  Forecast & Profit',
-    '🔬  Strategic Explorer',
+    '👥  Customers',
+    '🛒  Bundles',
+    '📈  Forecast & Strategy',
     '🤖  AI Analyst',
 ]
 
 selected_tab = st.sidebar.radio('Navigation', nav_tabs, index=0, label_visibility='collapsed')
+
+# ── Analytical Lens (Profit / Revenue) ───────────────────────────────────────
+st.sidebar.markdown('<hr style="border-color:#2D3142;">', unsafe_allow_html=True)
+_lens = st.sidebar.radio(
+    "Analysis Focus",
+    ["💰 Profit", "📈 Revenue"],
+    index=0 if st.session_state.dashboard_lens == 'Profit' else 1,
+    horizontal=True,
+    key="lens_radio_sidebar",
+)
+st.session_state.dashboard_lens = 'Revenue' if 'Revenue' in _lens else 'Profit'
 
 # ── Segment audience filter in sidebar ───────────────────────────────────────
 st.sidebar.markdown('<hr style="border-color:#2D3142;">', unsafe_allow_html=True)
@@ -753,6 +834,9 @@ else:
 def render_overview():
     """📊 Overview Dashboard — key metrics at a glance."""
 
+    if fin_engine is None or fc_engine is None:
+        st.warning("⚠️ Data engine tidak tersedia. Overview tidak bisa ditampilkan.")
+        return
     st.markdown('<h2>📊 Business Overview</h2>', unsafe_allow_html=True)
 
     # ── Lens-aware mode ────────────────────────────────────────────────────
@@ -861,13 +945,13 @@ def render_overview():
         _chart_title = '📈 90-Day Revenue Outlook' if _rev else '📈 90-Day Profit Outlook'
         st.markdown(f'<h4>{_chart_title}</h4>', unsafe_allow_html=True)
 
-        profit_fc = fc_engine.get_profit_forecast(margin_pct=avg_profit_pct / 100)
-        # Aggregate across all cities per day per scenario
+        # profit_fc sudah dihitung di atas — langsung pakai
         _metric_col = 'projected_revenue' if _rev else 'projected_profit'
         _label = f'Revenue ({cur_sym()})' if _rev else f'Profit ({cur_sym()})'
         agg = profit_fc.groupby(['created_at', 'scenario'])[
             _metric_col
         ].sum().reset_index()
+        _chart_cv(agg, _metric_col)
 
         fig_line = px.line(
             agg,
@@ -909,6 +993,7 @@ def render_overview():
         menu_margins.append(m)
 
     menu_profit_df = pd.DataFrame(menu_margins)
+    _chart_cv(menu_profit_df, 'price', 'cogs', 'net_profit')
 
     fig_menu = px.bar(
         menu_profit_df,
@@ -949,7 +1034,7 @@ def render_segments():
         )
 
         # Metrics
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2 = st.columns(2)
         col1.metric('Total Members', f"{meta['total_members']:,}")
         col2.metric('Segments', meta['k'])
 
@@ -1024,7 +1109,7 @@ def render_segments():
                     p['M_mean'] / max_m,
                     1 - p['R_mean'] / max_r,
                 ],
-                theta=['Visit Frequency (higher=better)', 'Visit Count', 'Total Spend', 'Visit Frequency'],
+                theta=['Visit Frequency', 'Visit Count', 'Total Spend', 'Visit Frequency (repeated)'],
                 name=seg_name,
                 fill='toself',
                 line_color=DARK_COLORS[i % len(DARK_COLORS)],
@@ -1052,7 +1137,8 @@ def render_segments():
 
         col1, col2, col3 = st.columns(3)
         col1.metric('Total Guest Transactions', f"{seg_counts['count'].sum():,}")
-        col2.metric('Segments', meta['optimal_k'])
+        col2.metric('Segments', meta.get('k', meta.get('optimal_k', '?')))
+        col3.metric('Avg Transaction Value', currency(fc_engine.avg_transaction_value if fc_engine else 0, ',.0f'))
 
         # Segment distribution
         st.markdown('<hr>', unsafe_allow_html=True)
@@ -1164,11 +1250,11 @@ def render_bundles():
 
     filtered = sorted_rules[_conf_cond & _lift_cond]
 
-    st.caption(f'Showing {len(filtered)} of {len(sorted_rules)} bundle opportunities')
-    # If filter is too restrictive, show a hint
+    # If filter is too restrictive, fallback to showing all
     if len(filtered) == 0:
         st.info('No bundles match these criteria. Try lowering the thresholds.')
         filtered = sorted_rules  # fallback: show all sorted
+    st.caption(f'Showing {len(filtered)} of {len(sorted_rules)} bundle opportunities')
 
     # ── Display table with clickable rows ─────────────────────────────────
     display_df = filtered[[
@@ -1273,14 +1359,17 @@ def render_bundles():
             ['created_at', 'scenario']
         )[['projected_profit', 'profit_increase']].sum().reset_index()
 
-        # Total projected increase
+        # Total projected increase (rata-rata kedua skenario) — SEBELUM _chart_cv
         total_increase = agg_impact.groupby('scenario')['profit_increase'].sum()
         total_profit = agg_impact.groupby('scenario')['projected_profit'].sum()
+
+        # Convert chart data RM→IDR only (summary cards pakai currency() yg handle sendiri)
+        _chart_cv(agg_impact, 'projected_profit', 'profit_increase')
 
         # Format numbers compactly to avoid overflow in narrow columns
         def _fmt(v):
             pfx = cur_sym()
-            cv = _c(v)  # converted value (RM→IDR if applicable)
+            cv = _c(v)  # converted value (RM→IDR if IDR mode)
             if cv >= 1_000_000:
                 return f'{pfx} {_fmt_idr(cv/1_000_000, ".1f")} Jt'
             elif cv >= 1_000:
@@ -1289,13 +1378,13 @@ def render_bundles():
 
         col_imp1, col_imp2 = st.columns(2)
         with col_imp1:
-            total_inc = total_increase.sum()
+            avg_inc = total_increase.mean()
             cons_inc = total_increase.get('Conservative Growth', 0)
             aggr_inc = total_increase.get('Aggressive Growth', 0)
             st.markdown(f"""
             <div class="insight-card" style="word-break:break-word;">
-                <div style="color:#B0B0C0;font-size:0.85rem;margin-bottom:8px;">Projected Profit Increase (90 days)</div>
-                <div class="value" style="color:#00B894;">{_fmt(total_inc)}</div>
+                <div style="color:#B0B0C0;font-size:0.85rem;margin-bottom:8px;">Projected Profit Increase (avg, 90 days)</div>
+                <div class="value" style="color:#00B894;">{_fmt(avg_inc)}</div>
                 <div class="sub">
                     Conservative: {_fmt(cons_inc)}<br>
                     Aggressive: {_fmt(aggr_inc)}
@@ -1303,7 +1392,8 @@ def render_bundles():
             </div>
             """, unsafe_allow_html=True)
         with col_imp2:
-            pct_boost = (total_inc / total_profit.sum() * 100) if total_profit.sum() > 0 else 0
+            avg_profit = total_profit.mean()
+            pct_boost = (avg_inc / avg_profit * 100) if avg_profit > 0 else 0
             st.markdown(f"""
             <div class="insight-card" style="word-break:break-word;">
                 <div style="color:#B0B0C0;font-size:0.85rem;margin-bottom:8px;">Uplift vs Baseline</div>
@@ -1391,7 +1481,12 @@ def render_bundles():
 
 
 def render_forecast():
-    """📈 Forecast & Profit — dual-model side-by-side view + fullscreen historical."""
+    """📈 Forecast & Strategy — profit forecast + interactive scenario simulator."""
+
+    # Guard: forecast or financial engine not available
+    if fc_engine is None or fin_engine is None:
+        st.warning("⚠️ Data forecast atau financial engine tidak tersedia. Pastikan file data sudah benar.")
+        return
 
     fs = st.session_state.forecast_fullscreen
     _rev_ft = st.session_state.get('dashboard_lens', 'Profit') == 'Revenue'
@@ -1480,6 +1575,15 @@ def render_forecast():
         hist_agg = hist_f.groupby('date', as_index=False)[_ft_metric].sum()
         fc_agg = fc_f.groupby(['created_at', 'scenario'], as_index=False)[_ft_metric].sum()
 
+        # Simpan total untuk summary cards (data masih RM) — SEBELUM _chart_cv
+        _total_hist_val = hist_agg[_ft_metric].sum()
+        _cons_fs_val = fc_agg[fc_agg['scenario'] == 'Conservative Growth'][_ft_metric].sum()
+        _aggr_fs_val = fc_agg[fc_agg['scenario'] == 'Aggressive Growth'][_ft_metric].sum()
+
+        # Convert chart data RM→IDR only (summary cards pakai currency() yg handle sendiri)
+        _chart_cv(hist_agg, _ft_metric)
+        _chart_cv(fc_agg, _ft_metric)
+
         # ── Build combined chart ──
         fig_fs = go.Figure()
 
@@ -1554,29 +1658,26 @@ def render_forecast():
         # ── Summary metrics below chart ──
         col_s1, col_s2, col_s3 = st.columns(3)
         with col_s1:
-            total_hist = hist_agg[_ft_metric].sum()
             st.markdown(f"""
             <div class="insight-card">
                 <h4>Historical {_ft_label}</h4>
-                <div class="value" style="color:#888;">{currency(total_hist, ',.0f')}</div>
+                <div class="value" style="color:#888;">{currency(_total_hist_val, ',.0f')}</div>
                 <div class="sub">{hist_f['date'].nunique():,} days · {len(sel_branches)} branch(es)</div>
             </div>
             """, unsafe_allow_html=True)
         with col_s2:
-            cons_fs = fc_agg[fc_agg['scenario'] == 'Conservative Growth'][_ft_metric].sum()
             st.markdown(f"""
             <div class="insight-card">
                 <h4>Conservative Growth</h4>
-                <div class="value" style="color:#6C5CE7;">{currency(cons_fs, ',.0f')}</div>
+                <div class="value" style="color:#6C5CE7;">{currency(_cons_fs_val, ',.0f')}</div>
                 <div class="sub">Stable 90-day projection</div>
             </div>
             """, unsafe_allow_html=True)
         with col_s3:
-            aggr_fs = fc_agg[fc_agg['scenario'] == 'Aggressive Growth'][_ft_metric].sum()
             st.markdown(f"""
             <div class="insight-card">
                 <h4>Aggressive Growth</h4>
-                <div class="value" style="color:#00B894;">{currency(aggr_fs, ',.0f')}</div>
+                <div class="value" style="color:#00B894;">{currency(_aggr_fs_val, ',.0f')}</div>
                 <div class="sub">Higher upside 90-day projection</div>
             </div>
             """, unsafe_allow_html=True)
@@ -1649,6 +1750,7 @@ def render_forecast():
     agg = profit_fc.groupby(['created_at', 'scenario'])[
         _ft_metric
     ].sum().reset_index()
+    _chart_cv(agg, _ft_metric)
 
     fig_fc = go.Figure()
 
@@ -1682,16 +1784,17 @@ def render_forecast():
             hoverinfo='skip',
         ))
 
-    # Add a "Forecast Start" marker line
+    # Add a "Forecast Start" marker line — derived from actual data
+    fc_start_dt = profit_fc['created_at'].min()
     fig_fc.add_shape(
         type='line',
-        x0='2025-07-01', x1='2025-07-01',
+        x0=fc_start_dt, x1=fc_start_dt,
         y0=0, y1=1,
         yref='paper',
         line=dict(dash='dash', color='#E17055', width=1.5),
     )
     fig_fc.add_annotation(
-        x='2025-07-01',
+        x=fc_start_dt,
         y=1, yref='paper',
         text='Forecast Start',
         showarrow=False,
@@ -1755,21 +1858,19 @@ def render_forecast():
                 st.session_state.selected_bundle = None
                 st.rerun()
 
-
-def render_explorer():
-    """🔬 Strategic Explorer — scenario planning with interactive sliders."""
-
-    st.markdown('<h2>🔬 Strategic Explorer</h2>', unsafe_allow_html=True)
+    # ═══════════════════════════════════════════════════════════════════════
+    #  STRATEGY SIMULATOR
+    # ═══════════════════════════════════════════════════════════════════════
+    st.markdown('<hr style="margin-top:40px;">', unsafe_allow_html=True)
+    st.markdown('<h2>🎛️ Strategy Simulator</h2>', unsafe_allow_html=True)
     st.markdown(
         '<div style="color:#888;margin-bottom:16px;">'
-        'Adjust strategy levers and see how your profit and inventory turnover would change. '
+        'Adjust strategy levers and see how profit and transaction volume would change. '
         'This is a <strong>cause-and-effect simulator</strong> — not a crystal ball.</div>',
         unsafe_allow_html=True
     )
 
     # ── Scenario Parameters ───────────────────────────────────────────────
-    st.markdown('<h4>🎛️ Strategy Levers</h4>', unsafe_allow_html=True)
-
     col_s1, col_s2, col_s3 = st.columns(3)
 
     with col_s1:
@@ -1798,7 +1899,7 @@ def render_explorer():
 
     # ── Calculate scenario impacts ────────────────────────────────────────
     st.markdown('<hr>', unsafe_allow_html=True)
-    st.markdown('<h4>📊 Scenario Impact Analysis</h4>', unsafe_allow_html=True)
+    st.markdown('<h4>📊 Scenario Impact</h4>', unsafe_allow_html=True)
 
     # Base values from financial engine
     base_margin = fin_engine.get_net_margin('Latte')
@@ -1898,31 +1999,35 @@ def render_explorer():
     stock_effect = stock_sales_boost * 100
     discount_volume_effect = discount_volume_boost * 100
     discount_margin_effect = -discount_intensity * 100 * 0.8  # Discount erodes margin
+    discount_net_effect = discount_volume_effect + discount_margin_effect
 
     waterfall = go.Figure(go.Waterfall(
         name='Impact',
         orientation='v',
-        measure=['relative', 'relative', 'relative', 'relative', 'total'],
+        measure=['relative', 'relative', 'relative', 'relative', 'relative', 'total'],
         x=[
             'Price Change',
             'Volume Elasticity',
             'Stock Availability',
-            'Discount Strategy',
+            'Discount: Volume Boost',
+            'Discount: Margin Erosion',
             'Net Impact',
         ],
         y=[
             price_effect,
             volume_effect_elasticity,
             stock_effect,
+            discount_volume_effect,
             discount_margin_effect,
-            base_total + price_effect + volume_effect_elasticity + stock_effect + discount_margin_effect,
+            base_total + price_effect + volume_effect_elasticity + stock_effect + discount_volume_effect + discount_margin_effect,
         ],
         text=[
             f'{price_effect:+.1f}%',
             f'{volume_effect_elasticity:+.1f}%',
             f'{stock_effect:+.1f}%',
+            f'{discount_volume_effect:+.1f}%',
             f'{discount_margin_effect:+.1f}%',
-            f'{base_total + price_effect + volume_effect_elasticity + stock_effect + discount_margin_effect:.1f}%',
+            f'{base_total + price_effect + volume_effect_elasticity + stock_effect + discount_volume_effect + discount_margin_effect:.1f}%',
         ],
         textposition='outside',
         connector={'line': {'color': CT['grid'], 'width': 1}},
@@ -1961,7 +2066,7 @@ def render_explorer():
 
     for i, d in enumerate(discount_range):
         for j, p in enumerate(price_range):
-            vol = 1 + (p * ELASTICITY) * (1 + d * 1.2)
+            vol = (1 + p * ELASTICITY) * (1 + d * 1.2)
             np_ = base_price * (1 + p)
             nd = base_price * d
             np_net = np_ - base_margin['cogs'] - base_margin['operating_cost'] - nd
@@ -2033,7 +2138,7 @@ def render_explorer():
             'stock_level': stock_adj,
             'discount_intensity': discount_intensity,
         }
-        st.success('Scenario saved! Switch between tabs to compare.')
+        st.success('Scenario saved! Switch to other tabs to compare.')
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2050,16 +2155,17 @@ def render_ai_analyst():
         unsafe_allow_html=True,
     )
 
-    if not gemini.is_ready:
+    if groq_analyst is None or not groq_analyst.is_ready:
         st.info(
             "🔑 **Set API Key Groq**\n\n"
-            "1. Buka https://aistudio.google.com/apikey\n"
-            "2. Buat API key (gratis)\n"
+            "1. Daftar gratis di https://console.groq.com (tidak perlu CC)\n"
+            "2. Buat API key (format: `gsk_...`)\n"
             "3. Set environment variable:\n"
             "   ```powershell\n"
-            '   $env:GEMINI_API_KEY = "AIza..."\n'
+            '   $env:GROQ_API_KEY = "gsk_..."\n'
             "   ```\n"
-            "   Atau restart terminal, lalu jalankan ulang app."
+            "4. Atau simpan file `gsk_....txt` di folder `data/`\n"
+            "5. Restart app"
         )
         return
 
@@ -2115,10 +2221,14 @@ def render_ai_analyst():
     if question:
         with st.spinner("🧠 Menganalisis data..."):
             # Build context data dari engine yang sudah ada
+            # Get actual margin for forecast context
+            _ctx_margin = fin_engine.get_net_margin('Latte') if fin_engine else None
+            _ctx_margin_pct = _ctx_margin['net_margin_pct'] / 100 if _ctx_margin else 0.25
             context_json = build_context(
                 segment_name=sel_seg,
                 seg_counts=seg_counts,
                 branch_name=sel_branch,
+                branch_city=sel_branch,
                 day_type=day_type,
                 rules_df=rules_df,
                 menu_df=menu_df,
@@ -2126,10 +2236,11 @@ def render_ai_analyst():
                 fc_engine=fc_engine,
                 question=question,
                 currency=st.session_state.get('currency', 'RM'),
+                margin_pct=_ctx_margin_pct,
             )
 
             # Panggil Groq (cache 5 menit)
-            insight = gemini.analyze(context_json)
+            insight = groq_analyst.analyze(context_json)
 
         # ── Display insight ────────────────────────────────────────────────
         st.markdown("### 💡 Hasil Analisis")
@@ -2162,35 +2273,26 @@ if st.button(_icon, key='theme_btn', help=_help):
     st.session_state.theme_toggle = '☀️ Light' if _effective_theme == 'dark' else '🌙 Dark'
     st.rerun()
 
-# ── Analytical Lens Switcher ───────────────────────────────────────────────
-_lens_holder = st.empty()
-with _lens_holder.container():
-    lens_col1, lens_col2 = st.columns([1, 4])
-    with lens_col1:
-        st.markdown('<div style="font-size:0.85rem;font-weight:500;color:var(--txt-secondary);padding-top:6px;">🎯 Focus:</div>', unsafe_allow_html=True)
-    with lens_col2:
-        _lens = st.radio(
-            "Analytical Lens",
-            ["💰 Profit", "📈 Revenue"],
-            index=0 if st.session_state.dashboard_lens == 'Profit' else 1,
-            horizontal=True,
-            label_visibility="collapsed",
-            key="lens_radio",
-        )
-        st.session_state.dashboard_lens = 'Revenue' if 'Revenue' in _lens else 'Profit'
 
-if selected_tab == nav_tabs[0]:
-    render_overview()
-elif selected_tab == nav_tabs[1]:
-    render_segments()
-elif selected_tab == nav_tabs[2]:
-    render_bundles()
-elif selected_tab == nav_tabs[3]:
-    render_forecast()
-elif selected_tab == nav_tabs[4]:
-    render_explorer()
-elif selected_tab == nav_tabs[5]:
-    render_ai_analyst()
+
+# ── Render selected tab with error boundary ─────────────────────────────
+_render_functions = {
+    nav_tabs[0]: render_overview,
+    nav_tabs[1]: render_segments,
+    nav_tabs[2]: render_bundles,
+    nav_tabs[3]: render_forecast,
+    nav_tabs[4]: render_ai_analyst,
+}
+
+_render_fn = _render_functions.get(selected_tab)
+if _render_fn:
+    try:
+        _render_fn()
+    except Exception as e:
+        st.error(f"❌ Terjadi error di tab ini: {e}")
+        with st.expander("🔍 Detail Error", expanded=False):
+            import traceback
+            st.code(traceback.format_exc(), language="python")
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  FOOTER

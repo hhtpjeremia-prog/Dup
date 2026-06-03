@@ -27,11 +27,32 @@ _GROQ_MODEL = "llama-3.3-70b-versatile"  # gratis, 30 req/menit ✅
 
 
 def _get_api_key() -> Optional[str]:
-    """Cari API key dari st.secrets dulu, fallback ke env var."""
+    """Cari API key dari st.secrets -> env var -> data/gsk_*.txt (fallback)."""
+    # 1. Streamlit secrets
     try:
         return st.secrets["GROQ_API_KEY"]
     except (KeyError, FileNotFoundError):
-        return os.environ.get("GROQ_API_KEY", None)
+        pass
+
+    # 2. Environment variable
+    env_key = os.environ.get("GROQ_API_KEY", None)
+    if env_key:
+        return env_key
+
+    # 3. File fallback: cari file gsk_*.txt di folder data/
+    try:
+        data_dir = os.path.join(os.path.dirname(__file__), "..", "data")
+        for fname in os.listdir(data_dir):
+            if fname.startswith("gsk_") and fname.endswith(".txt"):
+                path = os.path.join(data_dir, fname)
+                with open(path, "r") as f:
+                    key = f.read().strip()
+                    if key:
+                        return key
+    except Exception:
+        pass
+
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -155,7 +176,10 @@ class GroqAnalyst:
             lines.append(f"- Persentase: {seg.get('pct', 0):.1f}%")
             lines.append(f"- Rata-rata Recency: {seg.get('recency_mean', '-')} hari")
             lines.append(f"- Rata-rata Frequency: {seg.get('frequency_mean', '-')}x")
-            lines.append(f"- Rata-rata Monetary: {_cur_sym} {seg.get('monetary_mean', '-')}")
+            _mon_val = seg.get('monetary_mean', 0)
+            if isinstance(_mon_val, (int, float)):
+                _mon_val = _fmt_idr(_c(_mon_val), ',.0f')
+            lines.append(f"- Rata-rata Monetary: {_cur_sym} {_mon_val}")
             lines.append("")
 
         # Cabang
@@ -267,6 +291,7 @@ def build_context(
     fc_engine=None,
     question: str = "",
     currency: str = "RM",
+    margin_pct: float = 0.25,
 ) -> str:
     """
     Kumpulin data dari semua engine → JSON string siap kirim ke Groq.
@@ -319,7 +344,7 @@ def build_context(
     # ── Forecast ──────────────────────────────────────────────────────────
     if fc_engine is not None:
         try:
-            profit_fc = fc_engine.get_profit_forecast(margin_pct=0.25)
+            profit_fc = fc_engine.get_profit_forecast(margin_pct=margin_pct)
             agg = profit_fc.groupby("scenario")["projected_profit"].sum()
             ctx["forecast"] = {
                 "conservative": round(float(agg.get("Conservative Growth", 0))),
