@@ -1,4 +1,9 @@
 *.parquet
+!data/df_*_seg_counts.parquet
+!data/df_*_historical.parquet
+!data/df_forecast_90days_*.parquet
+!data/df_rules_*.parquet
+!data/menu_cleaned.parquet
 *.csv
 *.zip
 .ipynb_checkpoints/
@@ -14,7 +19,12 @@ __pycache__/
 *.joblib
 *.pkl
 *.json
+!data/df_avg_tx_value.json
+!data/df_cities.json
+!models/*.json
 *.txt
 # Intentionally omitted: *.md would exclude README.md and SourceOfTruth.md
 # If you need to exclude generated markdown, use a more specific pattern like:
 # reports/*.md
+# One-time utility script
+extract_metadata.py

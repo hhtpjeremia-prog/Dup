@@ -407,13 +407,15 @@ MEMBER_META   = MODELS / 'member_cluster_metadata.json'
 GUEST_META    = MODELS / 'guest_cluster_metadata.json'
 MEMBER_RULES  = DATA / 'df_rules_member.parquet'
 GUEST_RULES   = DATA / 'df_rules_guest.parquet'
-MEMBER_SEG    = DATA / 'df_member_with_segments.parquet'
-GUEST_SEG     = DATA / 'df_guest_with_segments.parquet'
+MEMBER_SEG    = DATA / 'df_member_seg_counts.parquet'          # metadata (pre-computed)
+GUEST_SEG     = DATA / 'df_guest_seg_counts.parquet'           # metadata (pre-computed)
 MENU_DATA     = DATA / 'menu_cleaned.parquet'
 FC_HWR        = DATA / 'df_forecast_90days_HWR-XGB.parquet'
 FC_PROPHET    = DATA / 'df_forecast_90days_Prophet-XGB.parquet'
 FC_SARIMA     = DATA / 'df_forecast_90days_SARIMA-XGB.parquet'
-TRANS_FEATURES = DATA / 'df_transaction_features.parquet'
+AVG_TX_VALUE  = DATA / 'df_avg_tx_value.json'                  # metadata (pre-computed)
+DAILY_HIST    = DATA / 'df_daily_historical.parquet'            # metadata (pre-computed)
+CITIES_FILE   = DATA / 'df_cities.json'                        # metadata (pre-computed)
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  HELPER: LOADERS
@@ -458,27 +460,15 @@ def load_menu():
     return pd.read_parquet(MENU_DATA)
 
 @st.cache_data
-def load_transaction_sample():
-    """Load a sample of transaction features for avg calculations."""
-    import pyarrow.parquet as pq
-    tbl = pq.read_table(str(TRANS_FEATURES), columns=['final_amount', 'basket_size', 'discount_applied'])
-    # Take a representative sample
-    sample = tbl.slice(0, 500000)
-    return sample.to_pandas()
+def load_avg_tx_value():
+    """Load pre-computed average transaction value from metadata."""
+    with open(AVG_TX_VALUE, 'r', encoding='utf-8') as f:
+        return json.load(f)['avg_transaction_value']
 
 @st.cache_data
 def load_historical_daily():
-    """Daily transaction counts + revenue aggregated by city (2023-07 to 2025-06)."""
-    import pyarrow.parquet as pq
-    tbl = pq.read_table(str(TRANS_FEATURES), columns=['city', 'created_at', 'final_amount'])
-    df = tbl.to_pandas()
-    df['date'] = pd.to_datetime(df['created_at']).dt.normalize()
-    daily = df.groupby(['date', 'city'], as_index=False).agg(
-        total_transactions=('final_amount', 'count'),
-        total_revenue=('final_amount', 'sum'),
-    )
-    daily = daily.sort_values(['date', 'city']).reset_index(drop=True)
-    return daily
+    """Load pre-computed daily historical data from metadata."""
+    return pd.read_parquet(DAILY_HIST)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -583,9 +573,8 @@ class ForecastEngine:
         self.full = pd.concat([self.conservative, self.aggressive], ignore_index=True)
         self.full['created_at'] = pd.to_datetime(self.full['created_at'])
 
-        # Derive average transaction value from historical data
-        tx_sample = load_transaction_sample()
-        self.avg_transaction_value = float(tx_sample['final_amount'].mean())
+        # Derive average transaction value from metadata
+        self.avg_transaction_value = float(load_avg_tx_value())
 
     def get_profit_forecast(self, margin_pct=0.25):
         """
