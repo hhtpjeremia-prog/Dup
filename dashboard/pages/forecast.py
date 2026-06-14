@@ -167,7 +167,9 @@ def _render_fullscreen(
     )
 
     with col_ctrl1:
-        sel_branches = st.session_state.get('branch_filter', branches)
+        sel_branches = st.session_state.get('branch_filter', [])
+        if not sel_branches:
+            sel_branches = branches
         dr = st.date_input(
             'Time Period',
             value=(date_min, date_max),
