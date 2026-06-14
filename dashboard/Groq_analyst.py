@@ -89,6 +89,146 @@ Untuk segmen At Risk di USJ (Weekend, peak 14-16):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+#  STANDALONE CACHED ANALYZE (avoids st.cache_data on instance methods)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@st.cache_data(ttl=300, show_spinner="🧠 Menganalisis data...")
+def _cached_analyze(_api_key: str, context_json: str) -> str:
+    """
+    Kirim context ke Groq API dan return insight.
+    Di-cache 5 menit.  Dipanggil oleh ``GroqAnalyst.analyze()``.
+    """
+    from groq import Groq
+
+    try:
+        context = json.loads(context_json)
+    except json.JSONDecodeError:
+        return "⚠️ Error: context_json tidak valid."
+
+    # ── Currency-aware formatting ──────────────────────────────────────
+    _cur_sym = context.get("currency", "RM")  # 'RM' or 'IDR'
+    _rate = 3500
+    def _c(v):
+        return v * _rate if _cur_sym == "IDR" else v
+    def _fmt_idr(n, fmt=",.0f"):
+        s = format(n, fmt)
+        s = s.replace(",", "X")
+        s = s.replace(".", ",")
+        s = s.replace("X", ".")
+        return s
+
+    # ── Bangun user prompt ────────────────────────────────────────────
+    lines = ["## DATA BISNIS SAAT INI\n"]
+
+    seg = context.get("segment", {})
+    if seg:
+        lines.append("### Segmen Pelanggan")
+        lines.append(f"- Nama: {seg.get('name', '-')}")
+        lines.append(f"- Jumlah: {_fmt_idr(seg.get('count', 0), ',.0f')} orang")
+        lines.append(f"- Persentase: {seg.get('pct', 0):.1f}%")
+        r_mean = seg.get('R_mean')
+        if r_mean is not None:
+            lines.append(f"- Rata-rata Recency: {r_mean:.1f} hari")
+        f_mean = seg.get('F_mean')
+        if f_mean is not None:
+            lines.append(f"- Rata-rata Frequency: {f_mean:.1f}x")
+        m_mean = seg.get('M_mean')
+        if m_mean is not None:
+            _mon_val = _fmt_idr(_c(m_mean), ',.0f')
+            lines.append(f"- Rata-rata Monetary: {_cur_sym} {_mon_val}")
+        rev_share = seg.get('revenue_share_pct')
+        if rev_share is not None:
+            lines.append(f"- Revenue Share: {rev_share:.1f}%")
+        lines.append("")
+
+    branch = context.get("branch", {})
+    if branch:
+        lines.append("### Cabang")
+        lines.append(f"- Nama: {branch.get('name', '-')}")
+        lines.append(f"- Kota: {branch.get('city', '-')}")
+        lines.append(f"- Hari: {branch.get('day_type', '-')}")
+        lines.append(f"- Jam puncak: {branch.get('peak_hour', '-')}")
+        lines.append("")
+
+    rules = context.get("bundling_rules", [])
+    if rules:
+        lines.append("### Aturan Bundling (Apriori)")
+        for r in rules[:5]:
+            lines.append(
+                f"- {r.get('A', '?')} + {r.get('B', '?')}  "
+                f"(confidence: {r.get('confidence', 0):.2f}, "
+                f"lift: {r.get('lift', 0):.2f})"
+            )
+        lines.append("")
+
+    margins = context.get("margins", [])
+    if margins:
+        lines.append("### Margin Estimasi per Item")
+        for m in margins:
+            lines.append(
+                f"- {m.get('item', '?')}: "
+                f"{_cur_sym} {_fmt_idr(_c(m.get('price', 0)), ',.0f')}, "
+                f"margin {m.get('margin_pct', 0):.1f}% "
+                f"{'⚠️ ESTIMASI' if m.get('is_estimate') else ''}"
+            )
+        lines.append("")
+
+    fc = context.get("forecast", {})
+    if fc:
+        lines.append("### Forecast 90 Hari")
+        lines.append(f"- Conservative Growth: {_cur_sym} {_fmt_idr(_c(fc.get('conservative', 0)), ',.0f')}")
+        lines.append(f"- Aggressive Growth: {_cur_sym} {_fmt_idr(_c(fc.get('aggressive', 0)), ',.0f')}")
+        lines.append("")
+
+    lines.append("### Constraint Bisnis")
+    lines.append("- Diskon maksimal: 25%")
+    lines.append(f"- Tanggal: {datetime.now().strftime('%Y-%m-%d')}")
+    lines.append("")
+
+    question = context.get("question", None)
+    if question:
+        lines.append(f"### Pertanyaan Spesifik: {question}")
+    else:
+        lines.append(
+            "### Tugas:\n"
+            "Berdasarkan data di atas, beri rekomendasi:\n"
+            "1. Voucher apa yang tepat? (jenis, besaran diskon, jam)\n"
+            "2. Bundle produk apa yang direkomendasikan?\n"
+            "3. Channel promosi terbaik?\n"
+            "4. Margin safety check\n"
+            "5. Insight tambahan"
+        )
+
+    user_prompt = "\n".join(lines)
+
+    # ── Panggil Groq ──────────────────────────────────────────────────
+    try:
+        client = Groq(api_key=_api_key)
+        response = client.chat.completions.create(
+            model=_GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": _SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.3,
+            max_tokens=1024,
+        )
+        return response.choices[0].message.content or "(kosong)"
+
+    except Exception as e:
+        err_str = str(e)
+        if "429" in err_str or "rate limit" in err_str.lower():
+            return (
+                "⚠️ **Rate limit Groq tercapai.**\n\n"
+                "Gratis: 30 request/menit, 6000 request/hari.\n\n"
+                "Coba:\n"
+                "1. Tunggu 1-2 menit, lalu coba lagi\n"
+                "2. Cek pemakaian di https://console.groq.com"
+            )
+        return f"⚠️ Error Groq: {e}"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 #  GROQ ANALYST CLASS
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -137,149 +277,14 @@ class GroqAnalyst:
 
     # ── Method utama: kirim data → dapat insight ──────────────────────────
 
-    @st.cache_data(ttl=300, show_spinner="🧠 Menganalisis data...")
-    def analyze(_self, context_json: str) -> str:
+    def analyze(self, context_json: str) -> str:
         """
         Terima data context (JSON string), kirim ke Groq, return insight.
-        Di-cache 5 menit.
+        Di-cache 5 menit (via standalone function).
         """
-        if not _self._ready:
+        if not self._ready:
             return "🔑 Set API Key Groq dulu (lihat info di atas)."
-
-        try:
-            context = json.loads(context_json)
-        except json.JSONDecodeError:
-            return "⚠️ Error: context_json tidak valid."
-
-        # ── Currency-aware formatting ──────────────────────────────────────
-        _cur_sym = context.get("currency", "RM")  # 'RM' or 'IDR'
-        _rate = 3500
-        def _c(v):
-            return v * _rate if _cur_sym == "IDR" else v
-        def _fmt_idr(n, fmt=",.0f"):
-            """Format number in Indonesian style: . = thousand sep, , = decimal sep."""
-            s = format(n, fmt)
-            s = s.replace(",", "X")
-            s = s.replace(".", ",")
-            s = s.replace("X", ".")
-            return s
-
-        # ── Bangun user prompt ────────────────────────────────────────────
-        lines = ["## DATA BISNIS SAAT INI\n"]
-
-        # Segmen
-        seg = context.get("segment", {})
-        if seg:
-            lines.append("### Segmen Pelanggan")
-            lines.append(f"- Nama: {seg.get('name', '-')}")
-            lines.append(f"- Jumlah: {_fmt_idr(seg.get('count', 0), ',.0f')} orang")
-            lines.append(f"- Persentase: {seg.get('pct', 0):.1f}%")
-            # RFM metrics (dari metadata — kalau ada)
-            r_mean = seg.get('R_mean')
-            if r_mean is not None:
-                lines.append(f"- Rata-rata Recency: {r_mean:.1f} hari")
-            f_mean = seg.get('F_mean')
-            if f_mean is not None:
-                lines.append(f"- Rata-rata Frequency: {f_mean:.1f}x")
-            m_mean = seg.get('M_mean')
-            if m_mean is not None:
-                _mon_val = _fmt_idr(_c(m_mean), ',.0f')
-                lines.append(f"- Rata-rata Monetary: {_cur_sym} {_mon_val}")
-            rev_share = seg.get('revenue_share_pct')
-            if rev_share is not None:
-                lines.append(f"- Revenue Share: {rev_share:.1f}%")
-            lines.append("")
-
-        # Cabang
-        branch = context.get("branch", {})
-        if branch:
-            lines.append("### Cabang")
-            lines.append(f"- Nama: {branch.get('name', '-')}")
-            lines.append(f"- Kota: {branch.get('city', '-')}")
-            lines.append(f"- Hari: {branch.get('day_type', '-')}")
-            lines.append(f"- Jam puncak: {branch.get('peak_hour', '-')}")
-            lines.append("")
-
-        # Bundling
-        rules = context.get("bundling_rules", [])
-        if rules:
-            lines.append("### Aturan Bundling (Apriori)")
-            for r in rules[:5]:
-                lines.append(
-                    f"- {r.get('A', '?')} + {r.get('B', '?')}  "
-                    f"(confidence: {r.get('confidence', 0):.2f}, "
-                    f"lift: {r.get('lift', 0):.2f})"
-                )
-            lines.append("")
-
-        # Margin
-        margins = context.get("margins", [])
-        if margins:
-            lines.append("### Margin Estimasi per Item")
-            for m in margins:
-                lines.append(
-                    f"- {m.get('item', '?')}: "
-                    f"{_cur_sym} {_fmt_idr(_c(m.get('price', 0)), ',.0f')}, "
-                    f"margin {m.get('margin_pct', 0):.1f}% "
-                    f"{'⚠️ ESTIMASI' if m.get('is_estimate') else ''}"
-                )
-            lines.append("")
-
-        # Forecast
-        fc = context.get("forecast", {})
-        if fc:
-            lines.append("### Forecast 90 Hari")
-            lines.append(f"- Conservative Growth: {_cur_sym} {_fmt_idr(_c(fc.get('conservative', 0)), ',.0f')}")
-            lines.append(f"- Aggressive Growth: {_cur_sym} {_fmt_idr(_c(fc.get('aggressive', 0)), ',.0f')}")
-            lines.append("")
-
-        # Constraint
-        lines.append("### Constraint Bisnis")
-        lines.append("- Diskon maksimal: 25%")
-        lines.append(f"- Tanggal: {datetime.now().strftime('%Y-%m-%d')}")
-        lines.append("")
-
-        # Question
-        question = context.get("question", None)
-        if question:
-            lines.append(f"### Pertanyaan Spesifik: {question}")
-        else:
-            lines.append(
-                "### Tugas:\n"
-                "Berdasarkan data di atas, beri rekomendasi:\n"
-                "1. Voucher apa yang tepat? (jenis, besaran diskon, jam)\n"
-                "2. Bundle produk apa yang direkomendasikan?\n"
-                "3. Channel promosi terbaik?\n"
-                "4. Margin safety check\n"
-                "5. Insight tambahan"
-            )
-
-        user_prompt = "\n".join(lines)
-
-        # ── Panggil Groq ──────────────────────────────────────────────────
-        try:
-            response = _self._client.chat.completions.create(
-                model=_GROQ_MODEL,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": user_prompt},
-                ],
-                temperature=0.3,
-                max_tokens=1024,
-            )
-            return response.choices[0].message.content or "(kosong)"
-
-        except Exception as e:
-            err_str = str(e)
-            if "429" in err_str or "rate limit" in err_str.lower():
-                return (
-                    "⚠️ **Rate limit Groq tercapai.**\n\n"
-                    "Gratis: 30 request/menit, 6000 request/hari.\n\n"
-                    "Coba:\n"
-                    "1. Tunggu 1-2 menit, lalu coba lagi\n"
-                    "2. Cek pemakaian di https://console.groq.com"
-                )
-            return f"⚠️ Error Groq: {e}"
+        return _cached_analyze(self.api_key, context_json)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

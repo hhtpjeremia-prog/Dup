@@ -3,36 +3,35 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 import warnings
-warnings.filterwarnings('ignore')
+
+
 class CleaningData:
+    """Utility class for data cleaning operations (outlier detection, transforms)."""
+
     def __init__(self, data):
         self.data = data
-    def Duplicate(self, column_name):
-        # ---------------------------------------------------------
-        # 1. CEK DUPLIKAT
-        # ---------------------------------------------------------
+
+    def duplicate(self, column_name):
+        """Count duplicate values in a column."""
         duplicate_count = self.data[column_name].duplicated().sum()
         return duplicate_count
-    def BoxPlot(self, column_name, Target = None):
-        # ---------------------------------------------------------
-        # 3. CEK BOX PLOT
-        # ---------------------------------------------------------
-        if Target is not None:
-            plot_target = Target
-        else:
-            plot_target = self.data[column_name]
-        plot_target.plot.box(vert=False)
-        plt.show()
-    def HistPlot(self, column_name, Target = None):
-        # ---------------------------------------------------------
-        # 4. CEK HISTOGRAM
-        # ---------------------------------------------------------
-        if Target is not None:
-            hist_target = Target
-        else:
-            hist_target = self.data[column_name]
-        hist_target.hist(bins=100)
-        plt.show()
+
+    def box_plot(self, column_name, target=None):
+        """Display a horizontal box plot for a column."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            plot_target = target if target is not None else self.data[column_name]
+            plot_target.plot.box(vert=False)
+            plt.show()
+
+    def hist_plot(self, column_name, target=None):
+        """Display a histogram for a column."""
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            hist_target = target if target is not None else self.data[column_name]
+            hist_target.hist(bins=100)
+            plt.show()
+
     def iqr(self, column_name):
         # ---------------------------------------------------------
         # 1. METODE IQR
@@ -117,6 +116,12 @@ def optimize_numeric_data(df):
                 )
 
     return df
+
+
+# ── Backward-compatible aliases for notebooks using old PascalCase names ─────
+CleaningData.Duplicate = CleaningData.duplicate
+CleaningData.BoxPlot = CleaningData.box_plot
+CleaningData.HistPlot = CleaningData.hist_plot
 
 
 def optimize_object_data(df, threshold=0.05):

@@ -23,6 +23,8 @@ __pycache__/
 !data/df_cities.json
 !data/df_peak_hours.json
 !data/df_guest_cluster_profiles.json
+!data/df_member_seg_by_branch.parquet
+!data/df_guest_seg_by_branch.parquet
 !models/*.json
 *.txt
 !requirements.txt
@@ -33,3 +35,4 @@ __pycache__/
 extract_metadata.py
 verify_metadata.py
 quick_test.py
+compute_seg_by_branch.py
