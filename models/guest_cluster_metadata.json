@@ -1,0 +1,20 @@
+{
+  "best_transform": "Quantile",
+  "cluster_cols": [
+    "final_amount",
+    "basket_size",
+    "item_count",
+    "hour",
+    "is_weekend_bool",
+    "is_voucher_used_bool",
+    "discount_ratio"
+  ],
+  "optimal_k": 4,
+  "cluster_id_to_name": {
+    "0": "Big Spender",
+    "1": "Weekend Visitor",
+    "2": "Deal Hunter",
+    "3": "Quick Buy"
+  },
+  "model_type": "MiniBatchKMeans"
+}

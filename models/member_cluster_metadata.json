@@ -1,0 +1,74 @@
+{
+  "model_type": "MiniBatchKMeans",
+  "k": 2,
+  "features": [
+    "Recency",
+    "Frequency",
+    "Monetary"
+  ],
+  "best_transform": "Quantile",
+  "inertia": 2648665.9243719615,
+  "n_iter": 2,
+  "silhouette_score": 0.4556413968708564,
+  "total_members": 2196257,
+  "cluster_labels": {
+    "0": "At Risk Regulars",
+    "1": "New Occasional",
+    "2": "Hibernating",
+    "3": "Champions"
+  },
+  "cluster_profiles": [
+    {
+      "cluster": 0,
+      "count": 399069,
+      "R_mean": 95.73424395280014,
+      "F_mean": 7.834730334854374,
+      "M_mean": 249.6458553782597,
+      "R_median": 82.0,
+      "F_median": 7.0,
+      "M_median": 224.5,
+      "monetary_sum": 99625921.85994673,
+      "pct": 18.17,
+      "revenue_share_pct": 44.0
+    },
+    {
+      "cluster": 1,
+      "count": 659353,
+      "R_mean": 86.52197381372345,
+      "F_mean": 1.0,
+      "M_mean": 31.01897042158289,
+      "R_median": 70.0,
+      "F_median": 1.0,
+      "M_median": 28.5,
+      "monetary_sum": 20452451.204381943,
+      "pct": 30.02,
+      "revenue_share_pct": 9.03
+    },
+    {
+      "cluster": 2,
+      "count": 627517,
+      "R_mean": 131.27529134668862,
+      "F_mean": 2.8463037654756764,
+      "M_mean": 84.56353671007624,
+      "R_median": 117.0,
+      "F_median": 3.0,
+      "M_median": 81.0,
+      "monetary_sum": 53065056.86569691,
+      "pct": 28.57,
+      "revenue_share_pct": 23.44
+    },
+    {
+      "cluster": 3,
+      "count": 510318,
+      "R_mean": 24.438630422599243,
+      "F_mean": 3.4112239819093193,
+      "M_mean": 104.36531052028072,
+      "R_median": 23.0,
+      "F_median": 3.0,
+      "M_median": 96.0,
+      "monetary_sum": 53259496.53408861,
+      "pct": 23.24,
+      "revenue_share_pct": 23.52
+    }
+  ]
+}
