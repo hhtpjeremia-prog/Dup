@@ -395,105 +395,67 @@ CITIES_FILE   = DATA / 'df_cities.json'                        # metadata (pre-c
 #  HELPER: LOADERS
 # ══════════════════════════════════════════════════════════════════════════════
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_json(path):
-    # Robust loader: when JSON file is missing on the deployment host, return empty dict
+    """Load JSON file — return {} if missing or broken."""
+    if not Path(path).exists():
+        st.warning(f"File '{Path(path).name}' not found; using empty defaults.")
+        return {}
     try:
-        if not Path(path).exists():
-            msg = f"Optional JSON file '{Path(path).name}' not found; continuing with empty defaults."
-            try:
-                st.warning(msg)
-            except Exception:
-                pass
-            return {}
         with open(path, 'r', encoding='utf-8') as f:
             return json.load(f)
-    except json.JSONDecodeError as e:
-        try:
-            st.error(f"Failed to parse JSON file {Path(path).name}: {e}")
-        except Exception:
-            pass
-        return {}
-    except Exception as e:
-        try:
-            st.exception(e)
-        except Exception:
-            pass
+    except (json.JSONDecodeError, Exception) as e:
+        st.error(f"Failed to parse {Path(path).name}: {e}")
         return {}
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_parquet(path):
     """Read parquet, handle categorical type issues."""
     import pyarrow.parquet as pq
     try:
         return pd.read_parquet(path)
     except TypeError:
-        # If categorical dtype fails, read with pyarrow directly
         tbl = pq.read_table(str(path))
         return tbl.to_pandas()
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_forecast(path):
     """Load forecast parquet safely."""
     import pyarrow.parquet as pq
     tbl = pq.read_table(str(path))
     return tbl.to_pandas()
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_segment_counts(path, col='segment_name'):
     import pyarrow.parquet as pq
-    tbl = pq.read_table(str(path), columns=[col])
     from collections import Counter
+    tbl = pq.read_table(str(path), columns=[col])
     counts = Counter(tbl.column(col).to_pylist())
     return pd.DataFrame([
         {'segment': k, 'count': v, 'pct': round(v / len(tbl) * 100, 1)}
         for k, v in sorted(counts.items(), key=lambda x: -x[1])
     ])
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_menu():
-    # Try the cleaned menu first; if missing, fall back to raw `menu_items.parquet` if available.
+    """Load menu — fallback from cleaned → raw if needed."""
     ALT_MENU = DATA / 'menu_items.parquet'
-    try:
-        if MENU_DATA.exists():
-            return pd.read_parquet(MENU_DATA)
+    if MENU_DATA.exists():
+        return pd.read_parquet(MENU_DATA)
+    if ALT_MENU.exists():
+        st.warning(f"'{MENU_DATA.name}' not found; using '{ALT_MENU.name}' as fallback.")
+        return pd.read_parquet(ALT_MENU)
+    raise FileNotFoundError(
+        f"Menu file not found. Tried '{MENU_DATA.name}' and '{ALT_MENU.name}'."
+    )
 
-        # Fallback: use raw menu items file if present
-        if ALT_MENU.exists():
-            msg = (
-                f"File '{MENU_DATA.name}' not found; falling back to '{ALT_MENU.name}'.\n"
-                "Consider adding a cleaned menu file to the repository for consistent results."
-            )
-            try:
-                st.warning(msg)
-            except Exception:
-                pass
-            return pd.read_parquet(ALT_MENU)
-
-        # Neither file exists — surface a clear error for logs/UI
-        msg = (
-            f"Required data file '{MENU_DATA.name}' not found in application directory, and fallback '{ALT_MENU.name}' is also missing. "
-            "Please add one of these files to the repository or update the path so the app can access it."
-        )
-        try:
-            st.error(msg)
-        except Exception:
-            pass
-        raise FileNotFoundError(msg)
-    except Exception as e:
-        try:
-            st.exception(e)
-        except Exception:
-            pass
-        raise
-
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_avg_tx_value():
     """Load pre-computed average transaction value from metadata."""
     with open(AVG_TX_VALUE, 'r', encoding='utf-8') as f:
         return json.load(f)['avg_transaction_value']
 
-@st.cache_data
+@st.cache_data(ttl=3600)
 def load_historical_daily():
     """Load pre-computed daily historical data from metadata."""
     return pd.read_parquet(DAILY_HIST)
@@ -730,8 +692,8 @@ guest_rules = load_parquet(GUEST_RULES)
 member_seg_counts = pd.read_parquet(MEMBER_SEG)
 guest_seg_counts = pd.read_parquet(GUEST_SEG)
 
-# ── Gemini AI Analyst ─────────────────────────────────────────────────────────
-gemini = GroqAnalyst()
+# ── Groq AI Analyst ───────────────────────────────────────────────────────────
+groq_analyst = GroqAnalyst()
 
 # ── Color palette for dark mode ──────────────────────────────────────────────
 DARK_COLORS = [
@@ -2850,14 +2812,14 @@ def render_ai_analyst():
         unsafe_allow_html=True,
     )
 
-    if not gemini.is_ready:
+    if not groq_analyst.is_ready:
         st.info(
             "🔑 **Set API Key Groq**\n\n"
-            "1. Buka https://aistudio.google.com/apikey\n"
-            "2. Buat API key (gratis)\n"
+            "1. Buka https://console.groq.com (tidak perlu CC)\n"
+            "2. Buat API key\n"
             "3. Set environment variable:\n"
             "   ```powershell\n"
-            '   $env:GEMINI_API_KEY = "AIza..."\n'
+            '   $env:GROQ_API_KEY = "gsk_..."\n'
             "   ```\n"
             "   Atau restart terminal, lalu jalankan ulang app."
         )
@@ -2920,6 +2882,10 @@ def render_ai_analyst():
 
     st.markdown('<br>', unsafe_allow_html=True)
 
+    # ── Load peak hours ────────────────────────────────────────────────────
+    _peak_hours = load_json(DATA / "df_peak_hours.json")
+    _peak_hour = str(_peak_hours.get(sel_branch, "8")) if _peak_hours else "-"
+
     # ── Generate insight ───────────────────────────────────────────────────
     if question:
         with st.spinner("🧠 Menganalisis data..."):
@@ -2927,8 +2893,11 @@ def render_ai_analyst():
             context_json = build_context(
                 segment_name=sel_seg,
                 seg_counts=seg_counts,
+                meta=meta,
                 branch_name=sel_branch,
+                branch_city=sel_branch,
                 day_type=day_type,
+                peak_hour=_peak_hour,
                 rules_df=rules_df,
                 menu_df=menu_df,
                 fin_engine=fin_engine,
@@ -2938,7 +2907,7 @@ def render_ai_analyst():
             )
 
             # Panggil Groq (cache 5 menit)
-            insight = gemini.analyze(context_json)
+            insight = groq_analyst.analyze(context_json)
 
         # ── Display insight ────────────────────────────────────────────────
         st.markdown("### 💡 Hasil Analisis")

@@ -1,0 +1,38 @@
+{
+  "Big Spender": {
+    "avg_final_amount": 45.0,
+    "avg_basket_size": 3.0,
+    "avg_item_count": 2.5,
+    "avg_hour": 12.0,
+    "pct_weekend": 35.0,
+    "pct_voucher": 20.0,
+    "avg_discount_ratio": 0.05
+  },
+  "Weekend Visitor": {
+    "avg_final_amount": 28.0,
+    "avg_basket_size": 2.0,
+    "avg_item_count": 1.8,
+    "avg_hour": 14.0,
+    "pct_weekend": 70.0,
+    "pct_voucher": 15.0,
+    "avg_discount_ratio": 0.03
+  },
+  "Deal Hunter": {
+    "avg_final_amount": 25.0,
+    "avg_basket_size": 2.0,
+    "avg_item_count": 1.5,
+    "avg_hour": 16.0,
+    "pct_weekend": 40.0,
+    "pct_voucher": 85.0,
+    "avg_discount_ratio": 0.25
+  },
+  "Quick Buy": {
+    "avg_final_amount": 18.0,
+    "avg_basket_size": 1.0,
+    "avg_item_count": 1.0,
+    "avg_hour": 10.0,
+    "pct_weekend": 30.0,
+    "pct_voucher": 5.0,
+    "avg_discount_ratio": 0.01
+  }
+}

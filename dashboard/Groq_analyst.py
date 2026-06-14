@@ -174,12 +174,20 @@ class GroqAnalyst:
             lines.append(f"- Nama: {seg.get('name', '-')}")
             lines.append(f"- Jumlah: {_fmt_idr(seg.get('count', 0), ',.0f')} orang")
             lines.append(f"- Persentase: {seg.get('pct', 0):.1f}%")
-            lines.append(f"- Rata-rata Recency: {seg.get('recency_mean', '-')} hari")
-            lines.append(f"- Rata-rata Frequency: {seg.get('frequency_mean', '-')}x")
-            _mon_val = seg.get('monetary_mean', 0)
-            if isinstance(_mon_val, (int, float)):
-                _mon_val = _fmt_idr(_c(_mon_val), ',.0f')
-            lines.append(f"- Rata-rata Monetary: {_cur_sym} {_mon_val}")
+            # RFM metrics (dari metadata — kalau ada)
+            r_mean = seg.get('R_mean')
+            if r_mean is not None:
+                lines.append(f"- Rata-rata Recency: {r_mean:.1f} hari")
+            f_mean = seg.get('F_mean')
+            if f_mean is not None:
+                lines.append(f"- Rata-rata Frequency: {f_mean:.1f}x")
+            m_mean = seg.get('M_mean')
+            if m_mean is not None:
+                _mon_val = _fmt_idr(_c(m_mean), ',.0f')
+                lines.append(f"- Rata-rata Monetary: {_cur_sym} {_mon_val}")
+            rev_share = seg.get('revenue_share_pct')
+            if rev_share is not None:
+                lines.append(f"- Revenue Share: {rev_share:.1f}%")
             lines.append("")
 
         # Cabang
@@ -281,6 +289,7 @@ class GroqAnalyst:
 def build_context(
     segment_name: str = "",
     seg_counts=None,
+    meta: dict = None,
     branch_name: str = "",
     branch_city: str = "",
     day_type: str = "Weekday",
@@ -302,11 +311,26 @@ def build_context(
     if segment_name and seg_counts is not None:
         row = seg_counts[seg_counts["segment"] == segment_name]
         if not row.empty:
-            ctx["segment"] = {
+            seg_ctx = {
                 "name": segment_name,
                 "count": int(row.iloc[0]["count"]),
                 "pct": float(row.iloc[0]["pct"]),
             }
+            # Tambah RFM / profile metrics dari metadata (kalau ada)
+            if meta:
+                # Member: cari di cluster_profiles + cluster_labels
+                profiles = meta.get("cluster_profiles")
+                labels = meta.get("cluster_labels", {})
+                if profiles:
+                    for p in profiles:
+                        label = labels.get(str(p["cluster"]))
+                        if label == segment_name:
+                            seg_ctx["R_mean"] = p.get("R_mean")
+                            seg_ctx["F_mean"] = p.get("F_mean")
+                            seg_ctx["M_mean"] = p.get("M_mean")
+                            seg_ctx["revenue_share_pct"] = p.get("revenue_share_pct")
+                            break
+            ctx["segment"] = seg_ctx
 
     # ── Branch ────────────────────────────────────────────────────────────
     ctx["branch"] = {

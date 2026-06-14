@@ -21,6 +21,8 @@ __pycache__/
 *.json
 !data/df_avg_tx_value.json
 !data/df_cities.json
+!data/df_peak_hours.json
+!data/df_guest_cluster_profiles.json
 !models/*.json
 *.txt
 !requirements.txt
