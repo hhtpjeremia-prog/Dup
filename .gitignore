@@ -23,6 +23,7 @@ __pycache__/
 !data/df_cities.json
 !models/*.json
 *.txt
+!requirements.txt
 # Intentionally omitted: *.md would exclude README.md and SourceOfTruth.md
 # If you need to exclude generated markdown, use a more specific pattern like:
 # reports/*.md
