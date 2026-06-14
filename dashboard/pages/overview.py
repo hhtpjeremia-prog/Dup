@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 import numpy as np
 
 from config import currency, cur_sym, _c, _fmt_idr, _chart_cv, hex_to_rgba, chart_theme, SEGMENT_DESCRIPTIONS, DARK_COLORS, IDR_RATE
-from components import compact_metric_card, metric_card_three_row, insight_mini_card
+from components import compact_metric_card, metric_card_three_row, insight_mini_card, get_filtered_seg_counts
 from engines import FinancialEngine, ForecastEngine
 from loaders import load_historical_daily, load_avg_tx_value
 
@@ -28,10 +28,12 @@ def render_overview(context: dict) -> None:
 
     CT = chart_theme()
 
+    # ── Branch-aware segment counts ───────────────────────────────────────
+    filtered_seg = get_filtered_seg_counts(is_member)
+
     # ── KPI Row ───────────────────────────────────────────────────────────
-    total_members = int(seg_counts['count'].sum()) if seg_counts is not None else 0
-    n_segments = len(seg_counts) if seg_counts is not None else 0
-    k = meta.get('k', meta.get('optimal_k', 0)) if meta else 0
+    total_members = int(filtered_seg['count'].sum()) if not filtered_seg.empty else 0
+    n_segments = len(filtered_seg) if not filtered_seg.empty else 0
 
     avg_tx = fc_engine.avg_transaction_value if fc_engine is not None else 0.0
     menu_count = len(menu_df) if menu_df is not None else 0
@@ -49,10 +51,10 @@ def render_overview(context: dict) -> None:
     col_pie, col_table = st.columns([0.5, 0.5], gap='medium')
 
     with col_pie:
-        if seg_counts is not None and len(seg_counts) > 0:
-            seg_counts = seg_counts.sort_values('count', ascending=True)
+        if not filtered_seg.empty:
+            _plot_data = filtered_seg.sort_values('count', ascending=True)
             fig_pie = px.pie(
-                seg_counts, values='count', names='segment',
+                _plot_data, values='count', names='segment',
                 color_discrete_sequence=DARK_COLORS,
                 hole=0.45,
             )
@@ -70,8 +72,8 @@ def render_overview(context: dict) -> None:
             st.plotly_chart(fig_pie, use_container_width=True)
 
     with col_table:
-        if seg_counts is not None and len(seg_counts) > 0:
-            display = seg_counts.copy()
+        if not filtered_seg.empty:
+            display = filtered_seg.copy()
             display['count'] = display['count'].apply(lambda x: f'{x:,}')
             display['pct'] = display['pct'].apply(lambda x: f'{x:.1f}%')
             display.columns = ['Segment', 'Count', '%']

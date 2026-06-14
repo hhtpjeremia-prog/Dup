@@ -10,7 +10,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from config import currency, chart_theme, DARK_COLORS, SEGMENT_DESCRIPTIONS
-from components import metric_card_three_row, insight_mini_card
+from components import metric_card_three_row, insight_mini_card, get_filtered_seg_counts
 from engines import FinancialEngine, ForecastEngine
 
 
@@ -26,6 +26,9 @@ def render_segments(context: dict) -> None:
 
     CT = chart_theme()
 
+    # ── Branch-aware segment counts ───────────────────────────────────────
+    filtered_seg = get_filtered_seg_counts(is_member)
+
     # ═══════════════════════════════════════════════════════════════════════
     #  MEMBER SEGMENTS
     # ═══════════════════════════════════════════════════════════════════════
@@ -39,12 +42,16 @@ def render_segments(context: dict) -> None:
         )
 
         # ── KPI Row (4 compact cards) ────────────────────────────────────
-        total_customers = meta.get('total_members', int(seg_counts['count'].sum()))
+        total_customers = int(filtered_seg['count'].sum()) if not filtered_seg.empty else 0
 
         try:
-            largest = seg_counts.nlargest(1, 'count').iloc[0]
-            largest_name = largest['segment']
-            largest_count = int(largest['count'])
+            if not filtered_seg.empty:
+                largest = filtered_seg.nlargest(1, 'count').iloc[0]
+                largest_name = largest['segment']
+                largest_count = int(largest['count'])
+            else:
+                largest_name = 'N/A'
+                largest_count = 0
         except Exception:
             largest_name = 'N/A'
             largest_count = 0
@@ -100,8 +107,9 @@ def render_segments(context: dict) -> None:
 
         dist_col1, dist_col2 = st.columns([1, 1.5])
 
+        _pie_data = filtered_seg if not filtered_seg.empty else seg_counts
         fig_pie = px.pie(
-            seg_counts, values='count', names='segment',
+            _pie_data, values='count', names='segment',
             title=None, color_discrete_sequence=DARK_COLORS, hole=0.4,
         )
         fig_pie.update_traces(
@@ -118,7 +126,7 @@ def render_segments(context: dict) -> None:
 
         # Right: AI Segmentation Insight (stacked top->bottom)
         try:
-            sc = seg_counts.sort_values('count', ascending=False).reset_index(drop=True)
+            sc = filtered_seg.sort_values('count', ascending=False).reset_index(drop=True) if not filtered_seg.empty else seg_counts.sort_values('count', ascending=False).reset_index(drop=True)
             largest_name = sc.loc[0, 'segment'] if len(sc) > 0 else 'N/A'
             largest_count = int(sc.loc[0, 'count']) if len(sc) > 0 else 0
             pct_val = float(sc.loc[0, 'pct']) if ('pct' in sc.columns and len(sc) > 0) else 0.0
@@ -229,12 +237,16 @@ def render_segments(context: dict) -> None:
         )
 
         # ── KPI Row (4 compact cards) ────────────────────────────────────
-        total_customers = int(seg_counts['count'].sum())
+        total_customers = int(filtered_seg['count'].sum()) if not filtered_seg.empty else 0
 
         try:
-            largest = seg_counts.nlargest(1, 'count').iloc[0]
-            largest_name = largest['segment']
-            largest_count = int(largest['count'])
+            if not filtered_seg.empty:
+                largest = filtered_seg.nlargest(1, 'count').iloc[0]
+                largest_name = largest['segment']
+                largest_count = int(largest['count'])
+            else:
+                largest_name = 'N/A'
+                largest_count = 0
         except Exception:
             largest_name = 'N/A'
             largest_count = 0
@@ -289,8 +301,9 @@ def render_segments(context: dict) -> None:
 
         dist_col1, dist_col2 = st.columns([1, 1.5])
 
+        _pie_data = filtered_seg if not filtered_seg.empty else seg_counts
         fig_pie = px.pie(
-            seg_counts, values='count', names='segment',
+            _pie_data, values='count', names='segment',
             title=None, color_discrete_sequence=DARK_COLORS, hole=0.4,
         )
         fig_pie.update_traces(
@@ -305,8 +318,9 @@ def render_segments(context: dict) -> None:
         )
         dist_col1.plotly_chart(fig_pie, use_container_width=True)
 
+        _table_data = filtered_seg if not filtered_seg.empty else seg_counts
         dist_col2.dataframe(
-            seg_counts.style.format({'pct': '{:.1f}%', 'count': '{:,}'}),
+            _table_data.style.format({'pct': '{:.1f}%', 'count': '{:,}'}),
             hide_index=True,
             use_container_width=True,
         )

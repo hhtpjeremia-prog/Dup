@@ -10,7 +10,7 @@ from __future__ import annotations
 import pandas as pd
 import streamlit as st
 
-from config import NAV_TABS, FC_HWR, cur_sym, _c, _fmt_idr
+from config import NAV_TABS, FC_HWR, cur_sym, _c, _fmt_idr, DATA
 from engines import FinancialEngine, ForecastEngine
 
 
@@ -354,6 +354,39 @@ def get_filtered_profit_fc(fc_engine: ForecastEngine,
         except Exception:
             pass
     return profit_fc
+
+
+def get_filtered_seg_counts(is_member: bool) -> pd.DataFrame:
+    """Return segment counts filtered by the currently selected branches.
+
+    Uses the pre-computed per-branch segment files.  If no branch filter
+    is active, returns global (all-branch) segment counts.
+    """
+    from loaders import load_seg_by_branch
+
+    # Pick the right per-branch file
+    fname = "df_member_seg_by_branch.parquet" if is_member else "df_guest_seg_by_branch.parquet"
+    path = DATA / fname
+
+    if not path.exists():
+        # Fallback: return empty
+        return pd.DataFrame(columns=["segment", "count", "pct"])
+
+    seg_bb = load_seg_by_branch(path)  # columns: branch, segment, count, pct_of_branch
+
+    sel_branches = st.session_state.get("branch_filter", [])
+    if sel_branches:
+        seg_bb = seg_bb[seg_bb["branch"].isin(sel_branches)]
+
+    if seg_bb.empty:
+        return pd.DataFrame(columns=["segment", "count", "pct"])
+
+    # Aggregate across selected branches: sum counts, recompute pct
+    grouped = seg_bb.groupby("segment", as_index=False)["count"].sum()
+    total = grouped["count"].sum()
+    grouped["pct"] = (grouped["count"] / total * 100).round(1)
+    grouped = grouped.sort_values("pct", ascending=False).reset_index(drop=True)
+    return grouped
 
 
 def aggregate_forecast_by_date(profit_fc: pd.DataFrame,
