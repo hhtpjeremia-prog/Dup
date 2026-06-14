@@ -27,5 +27,7 @@ __pycache__/
 # Intentionally omitted: *.md would exclude README.md and SourceOfTruth.md
 # If you need to exclude generated markdown, use a more specific pattern like:
 # reports/*.md
-# One-time utility script
+# One-time utility scripts
 extract_metadata.py
+verify_metadata.py
+quick_test.py
