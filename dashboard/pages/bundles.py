@@ -106,15 +106,16 @@ def render_bundles(context: dict) -> None:
             key='bundle_table',
         )
 
-        # Extract selected row
+        # Extract selected row — only update if bundle actually changed
+        # (prevents infinite loop: on_select='rerun' already triggers re-run)
         if selection and len(selection.selection.rows) > 0:
             row_idx = selection.selection.rows[0]
             if row_idx < len(filtered):
                 sel_row = filtered.iloc[row_idx]
                 bundle_label = f"{sel_row['antecedents']} + {sel_row['consequents']}"
-                st.session_state.selected_bundle = bundle_label
-                st.session_state.bundle_source = 'Members' if is_member else 'Guests (Non-Members)'
-                st.rerun()
+                if st.session_state.get('selected_bundle') != bundle_label:
+                    st.session_state.selected_bundle = bundle_label
+                    st.session_state.bundle_source = 'Members' if is_member else 'Guests (Non-Members)'
         else:
             # Also support quick-select buttons as an alternative
             st.markdown(
@@ -140,7 +141,6 @@ def render_bundles(context: dict) -> None:
                             ):
                                 st.session_state.selected_bundle = bundle_label
                                 st.session_state.bundle_source = 'Members' if is_member else 'Guests (Non-Members)'
-                                st.rerun()
 
         st.caption(f'Showing {len(filtered)} of {len(sorted_rules)} bundle opportunities')
 
@@ -348,7 +348,6 @@ def render_bundles(context: dict) -> None:
             if st.button('🔄 Clear Bundle Selection', key='clear_bundle_detail', use_container_width=True):
                 st.session_state.selected_bundle = None
                 st.session_state.bundle_source = None
-                st.rerun()
 
         else:
             st.markdown(
