@@ -692,10 +692,10 @@ def load_all_data():
             errors.append(f"{key}: {e}")
             data[key] = pd.DataFrame()
 
-    # Segment counts
+    # Segment counts (from pre-computed metadata — langsung baca, jangan pakai load_segment_counts)
     for key, path in [('member_seg_counts', MEMBER_SEG), ('guest_seg_counts', GUEST_SEG)]:
         try:
-            data[key] = load_segment_counts(path)
+            data[key] = pd.read_parquet(path)
         except Exception as e:
             errors.append(f"{key}: {e}")
             data[key] = pd.DataFrame()
