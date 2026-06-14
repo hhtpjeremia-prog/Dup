@@ -23,7 +23,7 @@ from groq import Groq
 #  KONFIGURASI
 # ══════════════════════════════════════════════════════════════════════════════
 
-_GROQ_MODEL = "llama-3.3-70b-versatile"  # gratis, 30 req/menit ✅
+_GROQ_MODEL = "llama-3.3-70b-versatile"  
 
 
 def _get_api_key() -> Optional[str]:
